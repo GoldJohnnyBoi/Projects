@@ -1,0 +1,146 @@
+// This is code that is used on the Arduino Portenta. Its purpose is to rotate a stepper mover using a driver. 
+
+
+
+#include <math.h>
+#include "Arduino_MachineControl.h"
+#include "Wire.h"
+#include <cmath>
+
+using namespace machinecontrol;
+uint16_t readings = 0;
+uint16_t HS_readings = 0;
+
+long delay_Micros = 1600; // Set value
+long currentMicros = 0; 
+long previousMicros = 0;
+int global_position = 0;
+int BR = 9600;
+int speed_var = 10000;
+int DIR_PIN = 0;
+int MOTOR_PIN = 1;
+int HOMING_SENSOR = 2;
+int DOOR_SENSOR = 3;
+int ENABLE_DRIVER_PIN = 4;
+int count  = 0;
+int interval = 0;
+
+
+void stepper_move(int set_position, int speed_var)
+{
+  int rotation_value=0;//The var for the degree difference
+  int i = 0;//count var
+  int del = 3;
+  int y_max = 5; // a larger y_max or a small y_min mean the speed of the motor will be decreased (larger = slower)
+  int y_min = 3;
+  int A = (y_max-y_min)/2;
+  int B = (360/rotation_value); //rotation value must be in degrees
+  int C = y_max - A;
+
+
+  //Checking if the wheel needs to go CW or CCW. This will also set the global_position value to keep track of the position.
+  if(set_position>=global_position){
+    rotation_value = set_position - global_position;
+    global_position = set_position;
+    digital_outputs.set(DIR_PIN,HIGH);//CCW
+  }
+  else{
+    rotation_value =  global_position - set_position;
+    global_position = set_position;
+    digital_outputs.set(DIR_PIN,LOW);//CW
+  }
+  Serial.println("Direction Set");
+  rotation_value = ceil(rotation_value*4.444);//conversion from 360 degrees to pulses (400).
+  Serial.println("Rotation Value Set");
+  //This loop controls the pulses and goes until it has hit the desired rotation_value.
+  while(i <= rotation_value){
+
+    int new_delay = A*cos(B*i)+C;
+
+    currentMicros = micros();
+    //The micros stuff makes sure we arent getting ahead of ourselves.
+    if(currentMicros - previousMicros >= delay_Micros){
+
+      i++;//count var
+
+      previousMicros = currentMicros;
+
+      digital_outputs.set(MOTOR_PIN,HIGH);
+
+      delay(new_delay);      //Speed var controls the speed of the motor (10,000 microseconds is a good speed). 
+
+      digital_outputs.set(MOTOR_PIN,LOW);
+
+      delay(new_delay);
+      
+    }
+  }
+}
+
+
+void homing_sequence() {
+  HS_readings = read_homing_input();
+  digital_outputs.set(DIR_PIN,HIGH); //Direction pin is 0 / Low is CW
+  while(HS_readings == HIGH) {
+    digital_outputs.set(MOTOR_PIN,HIGH);  //Motor pins are 1
+    delay(5);
+    digital_outputs.set(MOTOR_PIN,LOW);
+
+    HS_readings = read_homing_input();
+  
+  }
+}
+
+int read_homing_input() {
+  HS_readings = digital_inputs.read(DIN_READ_CH_PIN_02); //Homing sensor pin is 2
+  return HS_readings;
+}
+
+int read_doorcheck_input() {
+  readings = digital_inputs.read(DIN_READ_CH_PIN_03); // Door sensor is pin 3
+  return readings;
+}
+
+
+
+
+
+void execution() {
+  int doorsense = read_doorcheck_input();
+  if (doorsense == HIGH) {
+
+    stepper_move(270, speed_var);
+
+    delay(1000);
+   
+    stepper_move(0, speed_var);
+
+    delay(1000);
+
+  }
+}
+
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(BR); //                                                       <----------
+
+  while(!Serial);
+  Wire.begin();
+
+  if (!digital_inputs.init()) {                                             // Initialization Code for startup
+    Serial.println("Digital input GPIO expander initializations failed!!");
+  }
+
+  digital_outputs.set(ENABLE_DRIVER_PIN, HIGH); //                           <-----------                 
+
+  Serial.println("Homing...");
+  homing_sequence();
+  Serial.println("Homing Finished");
+
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  execution();
+}
